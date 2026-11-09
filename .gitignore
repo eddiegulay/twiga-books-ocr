@@ -1,0 +1,8 @@
+.venv/
+.work/
+logs/
+books/
+parsed-books/
+__pycache__/
+*.pyc
+.DS_Store
