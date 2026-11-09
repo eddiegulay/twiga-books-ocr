@@ -48,6 +48,7 @@ def main() -> None:
     ap.add_argument("--retry-failed", action="store_true")
     ap.add_argument("--test", action="store_true", help="Smoke-test first pages; does not touch progress.csv")
     ap.add_argument("--test-pages", type=int, default=2)
+    ap.add_argument("--ocr-plan", help="ocr_plan.csv from `python -m ingest`: OCR only the scanned pages/books, skip the rest")
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()
 
@@ -75,6 +76,8 @@ def main() -> None:
         return
     if not os.path.exists(T.PROGRESS_CSV):
         T.build_queue()
+    if args.ocr_plan:
+        T.apply_ocr_plan(T.load_ocr_plan(args.ocr_plan))
     if args.test:
         T.test_parse(first_pages=args.test_pages)
         return

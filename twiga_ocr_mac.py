@@ -47,11 +47,12 @@ UNWARP_MODE = "scans"               # "scans" (use UNWARP_QUALITIES) | "all" | "
 SAVE_VIS = False                    # also save layout visualisation PNGs per page (large)
 STALE_HOURS = 6                     # in_progress older than this (or from an earlier session) is re-picked
 PROGRESS_EVERY = 10                 # update pages_parsed of the running row every N pages (for monitoring)
+OCR_PLAN = None                     # {drive_path: [1-based pages]} from `python -m ingest` (ocr_plan.csv); None = OCR everything
 PIPELINE_KWARGS = {}                # extra PaddleOCRVL(...) kwargs, e.g. {"device": "gpu:0"}
 
 COLUMNS = ["order", "class", "subject", "curriculum", "language", "file_name", "drive_path", "pages",
            "status", "started_at", "finished_at", "pages_parsed", "output_md", "output_json_dir", "error"]
-STATUSES = ["done", "in_progress", "pending", "failed"]
+STATUSES = ["done", "in_progress", "pending", "failed", "skipped"]
 
 SESSION_START = dt.datetime.now(dt.timezone.utc)
 CATALOGUE_META: dict = {}
@@ -345,6 +346,21 @@ def run_book(pdf_path, out_dir, stem, unwarp=True, on_page=None):
     return len(pages_res), md_path if os.path.exists(md_path) else ""
 
 
+def _subset_pdf(path, pages, map_path):
+    """Rewrite `path` keeping only `pages` (1-based). Writes {ocr_index: original_page} to map_path so the
+    ingest step can put OCR text back on the right page."""
+    import json
+    from pypdf import PdfReader, PdfWriter
+    r, w = PdfReader(path), PdfWriter()
+    keep = [p for p in sorted(set(pages)) if 1 <= p <= len(r.pages)]
+    for p in keep:
+        w.add_page(r.pages[p - 1])
+    with open(path, "wb") as f:
+        w.write(f)
+    with open(map_path, "w") as f:
+        json.dump({str(i): p for i, p in enumerate(keep)}, f)
+
+
 def _parse_time(s):
     try:
         t = dt.datetime.fromisoformat(s)
@@ -385,6 +401,26 @@ def _match(df, cls=None, subject=None, retry_failed=False):
         s = slug(subject).lower()
         ok &= df["subject"].map(lambda v: slug(v).lower()) == s
     return ok
+
+
+def load_ocr_plan(path):
+    """ocr_plan.csv (written by `python -m ingest`) -> {drive_path: [pages]}."""
+    plan = {}
+    for _, r in pd.read_csv(path, dtype=str, keep_default_na=False).iterrows():
+        plan[r["drive_path"]] = [int(x) for x in r["pages"].split()]
+    return plan
+
+
+def apply_ocr_plan(plan):
+    """Activate a plan: pending books with no scanned pages are marked 'skipped' (their text layer is used
+    instead), so the queue only OCRs what needs it."""
+    global OCR_PLAN
+    OCR_PLAN = plan
+    df = load_progress()
+    skip = (df["status"] == "pending") & ~df["drive_path"].isin(plan.keys())
+    df.loc[skip, ["status", "error"]] = ["skipped", "text layer present: no OCR needed"]
+    save_progress(df)
+    print(f"OCR plan: {len(plan)} books need OCR, {int(skip.sum())} marked skipped")
 
 
 def _update(idx, **vals):
@@ -428,6 +464,9 @@ def parse(n=None, cls=None, subject=None, retry_failed=False):
             os.makedirs(out_dir, exist_ok=True)
             os.makedirs(os.path.dirname(local_pdf), exist_ok=True)
             shutil.copyfile(os.path.join(BOOKS_DIR, row["drive_path"]), local_pdf)   # read-only copy
+            only = (OCR_PLAN or {}).get(row["drive_path"])
+            if only and (not row["pages"] or len(only) < int(row["pages"])):
+                _subset_pdf(local_pdf, only, os.path.join(out_dir, "page_map.json"))   # OCR just the scanned pages
             pages, md_path = run_book(local_pdf, out_dir, stem, unwarp=unwarp_for(row["file_name"]), on_page=on_page)
             if not md_path:
                 raise RuntimeError("merged Markdown was not written")

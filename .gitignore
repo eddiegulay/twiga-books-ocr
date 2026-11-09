@@ -6,3 +6,4 @@ parsed-books/
 __pycache__/
 *.pyc
 .DS_Store
+ingest-output/
