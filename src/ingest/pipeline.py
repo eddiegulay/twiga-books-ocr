@@ -15,14 +15,15 @@ from concurrent.futures import ProcessPoolExecutor
 from . import SCHEMA_VERSION, chunk as C, lang, ocrjson, textlayer
 from .model import BookText
 
+OCR_DIR_NAMES = ("ocr-raw", "parsed-books")    # parsed-books = name used by earlier OCR runs
 OCR_COVERAGE_MIN = 0.5      # share of pages with text below which the book is routed to OCR as a whole
 
 
 # ---------------------------------------------------------------------------------------------- discovery
 def discover(books_dir: str, catalogue: str | None = None) -> list[dict]:
     """One dict per source PDF with catalogue/filename metadata (reuses the OCR queue's logic)."""
-    import twiga_ocr_mac as T
-    T.configure(books_dir=books_dir, output_dir=os.path.join(books_dir, "parsed-books"), catalogue=catalogue)
+    from ..ocr import runner as T
+    T.configure(books_dir=books_dir, output_dir=os.path.join(books_dir, "ocr-raw"), catalogue=catalogue)
     rows = T.scan_books()
     for r in rows:
         meta = T.CATALOGUE_META.get(r["file_name"]) or {}
@@ -89,7 +90,7 @@ def build(books_dir: str, out_dir: str, ocr_roots: list[str] | None = None, only
     rows = discover(books_dir)
     if only:
         rows = [r for r in rows if only.lower() in r["drive_path"].lower()]
-    ocr_roots = ocr_roots or [os.path.join(books_dir, "parsed-books"), os.path.join(os.path.dirname(books_dir), "parsed-books")]
+    ocr_roots = ocr_roots or [os.path.join(b, n) for n in OCR_DIR_NAMES for b in (books_dir, os.path.dirname(books_dir))]
     os.makedirs(os.path.join(out_dir, "chunks"), exist_ok=True)
 
     log(f"Extracting text layers from {len(rows)} PDFs with {workers} workers...")

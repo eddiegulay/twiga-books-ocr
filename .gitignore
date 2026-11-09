@@ -2,8 +2,8 @@
 .work/
 logs/
 books/
-parsed-books/
+ocr-raw/
 __pycache__/
 *.pyc
 .DS_Store
-ingest-output/
+final-chunks/

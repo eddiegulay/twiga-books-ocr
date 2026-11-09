@@ -12,7 +12,7 @@ from pypdf import PdfReader, PdfWriter
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-import twiga_ocr_mac as T  # noqa: E402
+from src.ocr import runner as T  # noqa: E402
 
 CATALOGUE = os.path.join(ROOT, "catalogue.xlsx")
 

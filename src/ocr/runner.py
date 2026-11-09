@@ -1,9 +1,9 @@
-"""twiga_ocr_mac: Mac (Apple Silicon) copy of twiga_ocr for local PaddleOCR-VL-1.6.
+"""OCR runner: PaddleOCR-VL-1.6 on Apple Silicon (queue, resume, per-page output).
 
-This is a separate copy of twiga_ocr.py with Mac-friendly defaults. The Colab
-module is untouched. Typical use on macOS with Google Drive for Desktop:
+Runs PaddleOCR-VL-1.6 locally on Apple Silicon for the scanned pages. Typical use on macOS (the books can also
+sit in ./books or any folder; Google Drive for Desktop paths work too):
 
-    import twiga_ocr_mac as T
+    from src.ocr import runner as T
     T.configure(
         books_dir="/Users/YOU/Library/CloudStorage/GoogleDrive-YOU@email/My Drive/"
                   "Twiga Tanzania/Twiga-Primary-School-Books",
@@ -34,9 +34,10 @@ import pandas as pd
 # --------------------------------------------------------------------------------------
 # Configuration (set with configure())
 # --------------------------------------------------------------------------------------
-OUTPUT_DIR_NAME = "parsed-books"
+OUTPUT_DIR_NAME = "ocr-raw"
+LEGACY_OUTPUT_DIR_NAMES = ("parsed-books",)   # earlier runs used this name; still skipped when scanning for source PDFs
 BOOKS_DIR = None            # .../Twiga-Primary-School-Books
-OUTPUT_DIR = None           # BOOKS_DIR/parsed-books
+OUTPUT_DIR = None           # ./ocr-raw
 PROGRESS_CSV = None         # OUTPUT_DIR/progress.csv
 CATALOGUE = None            # BOOKS_DIR/Twiga-Primary-Books-Catalogue.xlsx
 WORK_DIR = os.path.expanduser("~/twiga_work")  # local SSD scratch (not Drive)
@@ -47,7 +48,7 @@ UNWARP_MODE = "scans"               # "scans" (use UNWARP_QUALITIES) | "all" | "
 SAVE_VIS = False                    # also save layout visualisation PNGs per page (large)
 STALE_HOURS = 6                     # in_progress older than this (or from an earlier session) is re-picked
 PROGRESS_EVERY = 10                 # update pages_parsed of the running row every N pages (for monitoring)
-OCR_PLAN = None                     # {drive_path: [1-based pages]} from `python -m ingest` (ocr_plan.csv); None = OCR everything
+OCR_PLAN = None                     # {drive_path: [1-based pages]} from `python main.py ingest` (ocr_plan.csv); None = OCR everything
 PIPELINE_KWARGS = {}                # extra PaddleOCRVL(...) kwargs, e.g. {"device": "gpu:0"}
 
 COLUMNS = ["order", "class", "subject", "curriculum", "language", "file_name", "drive_path", "pages",
@@ -60,7 +61,7 @@ _PIPELINE = None
 
 
 def configure(books_dir, output_dir=None, catalogue=None, work_dir=None, **options):
-    """Set paths. output_dir defaults to <books_dir>/parsed-books, catalogue to the xlsx inside books_dir."""
+    """Set paths. output_dir defaults to <books_dir>/ocr-raw, catalogue to the xlsx inside books_dir."""
     global BOOKS_DIR, OUTPUT_DIR, PROGRESS_CSV, CATALOGUE, WORK_DIR, CATALOGUE_META
     BOOKS_DIR = os.path.abspath(books_dir)
     if not os.path.isdir(BOOKS_DIR):
@@ -84,7 +85,7 @@ def configure(books_dir, output_dir=None, catalogue=None, work_dir=None, **optio
 
 
 def find_books_dir(name="Twiga-Primary-School-Books", roots=None, max_depth=3):
-    """Look for the books folder under Colab Drive mounts or macOS Google Drive for Desktop."""
+    """Look for the books folder under macOS Google Drive for Desktop."""
     if roots is None:
         home = os.path.expanduser("~")
         cloud = os.path.join(home, "Library", "CloudStorage")
@@ -97,12 +98,7 @@ def find_books_dir(name="Twiga-Primary-School-Books", roots=None, max_depth=3):
                         p = os.path.join(base, sub)
                         if os.path.isdir(p):
                             mac_roots.append(p)
-        roots = (
-            "/content/drive/MyDrive",
-            "/content/drive/Shareddrives",
-            "/content/drive/.shortcut-targets-by-id",
-            *mac_roots,
-        )
+        roots = tuple(mac_roots)
     hits = []
     for root in roots:
         if not os.path.isdir(root):
@@ -116,7 +112,7 @@ def find_books_dir(name="Twiga-Primary-School-Books", roots=None, max_depth=3):
             if cur.count(os.sep) - base_depth >= max_depth:
                 dirs[:] = []
             else:
-                dirs[:] = [d for d in dirs if not d.startswith(".") or root.endswith("shortcut-targets-by-id")]
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
     return hits
 
 
@@ -212,11 +208,11 @@ def count_pages(path, fallback=None):
 
 
 def scan_books():
-    """All source PDFs under BOOKS_DIR (recursive, includes Teaching Guides), never the parsed-books output."""
+    """All source PDFs under BOOKS_DIR (recursive, includes Teaching Guides), never the OCR output folders."""
     rows = []
     out_real = os.path.realpath(OUTPUT_DIR)
     for root, dirs, files in os.walk(BOOKS_DIR):
-        dirs[:] = sorted(d for d in dirs if d != OUTPUT_DIR_NAME and not d.startswith(".")
+        dirs[:] = sorted(d for d in dirs if d != OUTPUT_DIR_NAME and d not in LEGACY_OUTPUT_DIR_NAMES and not d.startswith(".")
                          and os.path.realpath(os.path.join(root, d)) != out_real)
         rel_root = os.path.relpath(root, BOOKS_DIR)
         top = rel_root.split(os.sep)[0] if rel_root != "." else ""
@@ -404,7 +400,7 @@ def _match(df, cls=None, subject=None, retry_failed=False):
 
 
 def load_ocr_plan(path):
-    """ocr_plan.csv (written by `python -m ingest`) -> {drive_path: [pages]}."""
+    """ocr_plan.csv (written by `python main.py ingest`) -> {drive_path: [pages]}."""
     plan = {}
     for _, r in pd.read_csv(path, dtype=str, keep_default_na=False).iterrows():
         plan[r["drive_path"]] = [int(x) for x in r["pages"].split()]

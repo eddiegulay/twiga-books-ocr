@@ -7,8 +7,8 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from ingest import chunk as C, clean, lang, ocrjson, pipeline  # noqa: E402
-from ingest.model import Block, BookText, PageInfo  # noqa: E402
+from src.ingest import chunk as C, clean, lang, ocrjson, pipeline  # noqa: E402
+from src.ingest.model import Block, BookText, PageInfo  # noqa: E402
 
 
 class CleanTests(unittest.TestCase):
@@ -125,7 +125,7 @@ class TextLayerTests(unittest.TestCase):
         except ImportError:
             self.skipTest("reportlab not installed")
         import pdfplumber
-        from ingest import textlayer
+        from src.ingest import textlayer
         path = os.path.join(tempfile.mkdtemp(), "t.pdf")
         c = canvas.Canvas(path)
         c.setFont("Helvetica", 12)
